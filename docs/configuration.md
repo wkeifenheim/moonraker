@@ -201,6 +201,17 @@ type: gpio
 #   The type of device.  Can be either gpio, tplink_smartplug, tasmota
 #   shelly, homeseer, homeassistant, or loxonev1.
 #   This parameter must be provided.
+enable_reset: False
+#   If True, then the device acts like a reset switch and momentarily toggles
+#   state before toggling again to return to the initial state. This setting
+#   will modify the behavior, when enabled, of off_when_shutdown and
+#   restart_klipper_when_powered by toggling power twice. All change state
+#   API requests are ignored unless the requested action is 'reset'.
+#   The default is False.
+reset_delay: 0.5
+#   Only applies when enable_reset is set to True. Value is the number
+#   of seconds between toggles of the power state.
+#   The default is 0.5 seconds.
 off_when_shutdown: False
 #   If set to True the device will be powered off when Klipper enters
 #   the "shutdown" state.  This option applies to all device types.

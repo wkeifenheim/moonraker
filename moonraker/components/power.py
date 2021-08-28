@@ -12,6 +12,8 @@ import json
 import struct
 import socket
 import asyncio
+import time
+
 from tornado.iostream import IOStream
 from tornado.httpclient import AsyncHTTPClient
 from tornado.escape import json_decode
@@ -172,7 +174,7 @@ class PrinterPower:
             action = "status"
         elif req_action == "POST":
             action = web_request.get_str('action').lower()
-            if action not in ["on", "off", "toggle"]:
+            if action not in ["on", "off", "toggle", "reset"]:
                 raise self.server.error(
                     f"Invalid requested action '{action}'")
         result = await self._process_request(dev, action)
@@ -203,9 +205,7 @@ class PrinterPower:
         if ret is not None:
             await ret
         dev_info = device.get_device_info()
-        if req == "toggle":
-            req = "on" if dev_info['status'] == "off" else "off"
-        if req in ["on", "off"]:
+        if req in ["on", "off", "toggle", "reset"]:
             cur_state: str = dev_info['status']
             if req == cur_state:
                 # device is already in requested state, do nothing
@@ -215,7 +215,11 @@ class PrinterPower:
                 raise self.server.error(
                     f"Unable to change power for {device.get_name()} "
                     "while printing")
-            ret = device.set_power(req)
+            if device.enable_reset is False and req == "reset":
+                raise self.server.error(
+                    f"Invalid action for {device.get_name()}. The reset action "
+                    "must be enabled in config")
+            ret = device.handle_power_request(req)
             if ret is not None:
                 await ret
             dev_info = device.get_device_info()
@@ -233,7 +237,7 @@ class PrinterPower:
             status = state.lower()
             if status in ["true", "false"]:
                 status = "on" if status == "true" else "off"
-        if status not in ["on", "off"]:
+        if status not in ["on", "off", "reset"]:
             logging.info(f"Invalid state received: {state}")
             return
         if device not in self.devices:
@@ -268,6 +272,8 @@ class PowerDevice:
         self.server = config.get_server()
         self.name = name_parts[1]
         self.type: str = config.get('type')
+        self.enable_reset: bool = config.get('enable_reset', False)
+        self.reset_delay: float = config.get('reset_delay', 0.5)
         self.state: str = "init"
         self.locked_while_printing = config.getboolean(
             'locked_while_printing', False)
@@ -291,7 +297,8 @@ class PowerDevice:
             'device': self.name,
             'status': self.state,
             'locked_while_printing': self.locked_while_printing,
-            'type': self.type
+            'type': self.type,
+            'enable_reset': self.enable_reset
         }
 
     def get_locked_while_printing(self) -> bool:
@@ -313,6 +320,19 @@ class PowerDevice:
 
     def refresh_status(self) -> Optional[Coroutine]:
         raise NotImplementedError
+
+    def handle_power_request(self, req: str):
+        if req in ["toggle", "reset"]:
+            target_state = "on" if self.state == "off" else "off"
+            if req == "reset":
+                self.set_power(target_state)
+                time.sleep(self.reset_delay)
+                target_state = "on" if self.state == "off" else "off"
+        elif req in ["on", "off"]:
+            target_state = req
+        else:
+            raise NotImplementedError
+        self.set_power(target_state)
 
     def set_power(self, state: str) -> Optional[Coroutine]:
         raise NotImplementedError
